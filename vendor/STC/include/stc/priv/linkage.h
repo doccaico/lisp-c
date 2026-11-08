@@ -1,0 +1,90 @@
+/* MIT License
+ *
+ * Copyright (c) 2026 Tyge Løvset
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+#undef STC_API
+#undef STC_DEF
+
+#if !defined i_implement && (defined STC_IMPLEMENT || defined i_import || defined i_body)
+  #define i_implement
+#endif
+#if defined i_header || defined STC_HEADER || defined i_implement
+  // external linking, used for non-templated modules
+  #ifdef __cplusplus
+    #define STC_API extern "C"
+  #else
+    #define STC_API extern
+  #endif
+  #define STC_DEF
+#else
+  // static linking, default for templated containers
+  #if defined __GNUC__ || defined __clang__ || defined __INTEL_LLVM_COMPILER
+    #define STC_API static __attribute__((unused))
+  #else
+    #define STC_API static inline
+  #endif
+  #define STC_DEF static
+  #ifndef i_implement
+    #define i_implement
+  #endif
+#endif
+
+#ifdef STC_ALLOCATOR
+  #define i_allocator STC_ALLOCATOR
+#endif
+#if defined i_aux && defined i_allocator
+  #define _i_aux_alloc
+#endif
+#if !defined i_allocator
+  #define i_allocator c
+#endif
+#if !defined i_malloc && defined i_realloc // in case only i_realloc and i_free is defined
+  #define i_malloc(new_sz) i_realloc(NULL, 0, new_sz)
+#elif !defined i_malloc
+  #define i_malloc(new_sz) c_JOIN(i_allocator, _malloc)(new_sz)
+#endif
+#if !defined i_realloc
+  #define i_realloc(ptr, sz, new_sz) c_JOIN(i_allocator, _realloc)(ptr, sz, new_sz)
+  #define i_free(ptr, sz) c_JOIN(i_allocator, _free)(ptr, sz)
+#endif
+
+#if defined __clang__ && !defined __cplusplus
+  #pragma clang diagnostic push
+  #pragma clang diagnostic warning "-Wall"
+  #pragma clang diagnostic warning "-Wextra"
+  #pragma clang diagnostic warning "-Wpedantic"
+  #pragma clang diagnostic warning "-Wconversion"
+  #pragma clang diagnostic warning "-Wwrite-strings"
+  // ignored
+  #pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#elif defined __GNUC__ && !defined __cplusplus
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic warning "-Wall"
+  #pragma GCC diagnostic warning "-Wextra"
+  #pragma GCC diagnostic warning "-Wpedantic"
+  #pragma GCC diagnostic warning "-Wconversion"
+  #pragma GCC diagnostic warning "-Wwrite-strings"
+  // ignored
+  #pragma GCC diagnostic ignored "-Wclobbered"
+  #pragma GCC diagnostic ignored "-Wimplicit-fallthrough=3"
+  #pragma GCC diagnostic ignored "-Wstringop-overflow="
+  #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif

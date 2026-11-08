@@ -1,0 +1,141 @@
+/* MIT License
+ *
+ * Copyright (c) 2026 Tyge Løvset
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/*
+// https://stackoverflow.com/questions/70935435/how-to-create-variants-in-rust
+#include <stdio.h>
+#include <stc/cstr.h>
+#include <stc/algorithm.h>
+
+c_union (Action,
+    (ActionSpeak, cstr),
+    (ActionQuit, bool),
+    (ActionRunFunc, struct {
+        int32_t (*func)(int32_t, int32_t);
+        int32_t v1, v2;
+    })
+);
+
+void Action_drop(Action* self) {
+    c_when (self, ActionSpeak, s) {
+        cstr_drop(s);
+    }
+}
+
+void my_action(Action* action) {
+    c_when (action) {
+        c_is(ActionSpeak, s) {
+            printf("Asked to speak: %s\n", cstr_str(s));
+        }
+        c_is(ActionQuit) {
+            printf("Asked to quit!\n");
+        }
+        c_is(ActionRunFunc, r) {
+            int32_t res = r->func(r->v1, r->v2);
+            printf("v1: %d, v2: %d, res: %d\n", r->v1, r->v2, res);
+        }
+        c_otherwise assert(!"no match");
+    }
+}
+
+int32_t add(int32_t a, int32_t b) {
+    return a + b;
+}
+
+int main(void) {
+    Action act1 = c_variant(ActionSpeak, cstr_from("Hello"));
+    Action act2 = c_variant(ActionQuit, 1);
+    Action act3 = c_variant(ActionRunFunc, {add, 5, 6});
+
+    my_action(&act1);
+    my_action(&act2);
+    my_action(&act3);
+
+    c_drop(Action, &act1, &act2, &act3);
+}
+*/
+#ifndef STC_SUMTYPE_H_INCLUDED
+#define STC_SUMTYPE_H_INCLUDED
+#include "reflect.h"
+
+#define _rfl_union_enum(U, Tag, ...) Tag,
+#define _rfl_union_enum_1(x, ...) (x=1, __VA_ARGS__)
+#define _rfl_union_type(U, Tag, ...) typedef __VA_ARGS__ Tag##_type; typedef U Tag##_sumtype;
+#define _rfl_union_field(U, Tag, ...) struct { enum U##_tag id; Tag##_type val; } Tag;
+
+#define c_union(U, ...) \
+    typedef union U U; \
+    enum U##_tag { c_reflect_each(U, _rfl_union_enum, _rfl_union_enum_1 __VA_ARGS__) }; \
+    c_reflect_each(U, _rfl_union_type, __VA_ARGS__) \
+    union U { \
+        int tag_id; \
+        struct { enum U##_tag id; } _tag; \
+        c_reflect_each(U, _rfl_union_field, __VA_ARGS__) \
+    }
+
+#define c_when(...) c_MACRO_OVERLOAD(c_when, __VA_ARGS__)
+#define c_when_3(varptr, Tag, x) \
+    for (Tag##_type *x = &(varptr)->Tag.val \
+        ; x && c_container_of(x, Tag##_sumtype, Tag.val)->Tag.id == Tag \
+        ; x = NULL)
+
+#define c_is(...) c_MACRO_OVERLOAD(c_is, __VA_ARGS__)
+#define c_is_1(Tag) break; case Tag:
+#define c_or_is(Tag) ; case Tag:
+
+#define c_otherwise \
+    break; default:
+
+#ifdef STC_HAS_TYPEOF
+    #define c_when_1(varptr) \
+        for (c_typeof(varptr) _vp1 = (varptr); _vp1; _vp1 = NULL) \
+        switch (_vp1->_tag.id)
+
+    #define c_is_2(Tag, x) \
+        break; case Tag: \
+        for (c_typeof(_vp1->Tag.val)* x = &_vp1->Tag.val; x; x = NULL)
+#else
+    #define c_when_1(varptr) \
+        for (const int* _vp_id = &(varptr)->tag_id; _vp_id; _vp_id = NULL) \
+            switch (*_vp_id)
+
+    #define c_is_2(Tag, x) \
+        break; case Tag: \
+        for (Tag##_type *x = &c_container_of(_vp_id, Tag##_sumtype, tag_id)->Tag.val; x; x = NULL)
+#endif
+
+#define c_variant(Tag, ...) \
+    (c_literal(Tag##_sumtype){.Tag={.id=Tag, .val=__VA_ARGS__}})
+
+#define c_is_variant(uptr, Tag) \
+    ((uptr)->Tag.id == Tag)
+
+#define c_get_variant(uptr, Tag) \
+    ((uptr)->Tag.id == Tag ? &(uptr)->Tag.val : NULL)
+
+#define c_variant_tag(uptr) \
+    ((uptr)->tag_id + 0)
+
+// The following is [deprecated]
+#define c_sumtype c_union
+
+#endif // STC_SUMTYPE_H_INCLUDED
