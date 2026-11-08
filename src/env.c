@@ -1,4 +1,5 @@
 Expr* eval(Expr* expr, Env* env, cstr* err);
+Expr* invoke(Expr* procedure, vec_expr* args, Env* env, cstr* err);
 Env* find_env(Env* env, const cstr* name);
 
 static bool conv_float(Expr* expr, f64* val)
@@ -281,6 +282,144 @@ Expr* lambda_proc(vec_expr *args, Env* env, cstr* err)
   return new_lambda(params, body, env);
 }
 
+Expr* apply_proc(vec_expr *args, Env* env, cstr* err)
+{
+  // (apply (lambda (a b) a) (list 1 2)) -> 1
+
+  if (vec_expr_size(args) != 2)
+  {
+    assign_err(err, "apply requires exactly 2 arguments (a procedure/lambda and a list)");
+    return NULL;
+  }
+
+  Expr* procedure = eval(*vec_expr_at(args, 0), env, err);
+  if (!cstr_is_empty(err))
+  {
+    return NULL;
+  }
+
+  if (procedure->type != TYPE_PROC && procedure->type != TYPE_LAMBDA)
+  {
+    assign_err(err, "first argument to apply must be a procedure or lambda");
+    free_all(procedure);
+    return NULL;
+  }
+
+  Expr* list_val = eval(*vec_expr_at(args, 1), env, err);
+  if (!cstr_is_empty(err))
+  {
+    free_all(procedure);
+    return NULL;
+  }
+
+  bool param_list_ok = false;
+  vec_expr param_list = flatten_list(list_val, &param_list_ok);
+  if (!param_list_ok)
+  {
+    vec_expr_drop(&param_list);
+    free_all(procedure);
+    free_all(list_val);
+    assign_err(err, "second argument to apply must evaluate to a proper list");
+    return NULL;
+  }
+
+  vec_expr invoke_args = vec_expr_with_capacity(vec_expr_size(&param_list));
+  for (c_each(n, vec_expr, param_list)) {
+    vec_expr_push_back(&invoke_args, *n.ref);
+  }
+
+  Expr* val = invoke(procedure, &invoke_args, env, err);
+
+  free_all(procedure);
+  free_all(list_val);
+  vec_expr_drop(&param_list);
+  vec_expr_drop(&invoke_args);
+
+  return val;
+}
+
+Expr* map_proc(vec_expr *args, Env* env, cstr* err)
+{
+  // (map (lambda (a) (+ a 10)) (list 0 1 2)) -> (10 11 12)
+  if (vec_expr_size(args) != 2)
+  {
+    assign_err(err, "map requires exactly 2 arguments (a procedure/lambda and a list)");
+    return NULL;
+  }
+
+  Expr* procedure = eval(*vec_expr_at(args, 0), env, err);
+  if (!cstr_is_empty(err))
+  {
+    return NULL;
+  }
+
+  if (procedure->type != TYPE_PROC && procedure->type != TYPE_LAMBDA)
+  {
+    assign_err(err, "first argument to apply must be a procedure or lambda");
+    free_all(procedure);
+    return NULL;
+  }
+
+  Expr* list_val = eval(*vec_expr_at(args, 1), env, err);
+  if (!cstr_is_empty(err))
+  {
+    free_all(procedure);
+    return NULL;
+  }
+
+  bool param_list_ok = false;
+  vec_expr param_list = flatten_list(list_val, &param_list_ok);
+  if (!param_list_ok)
+  {
+    vec_expr_drop(&param_list);
+    free_all(procedure);
+    free_all(list_val);
+    assign_err(err, "second argument to apply must evaluate to a proper list");
+    return NULL;
+  }
+
+  vec_expr results = vec_expr_with_capacity(vec_expr_size(&param_list));
+  for (c_each(n, vec_expr, param_list))
+  {
+    vec_expr invoke_args = vec_expr_with_capacity(1);
+    vec_expr_push_back(&invoke_args, *n.ref);
+
+    Expr* res_val = invoke(procedure, &invoke_args, env, err);
+    vec_expr_drop(&invoke_args);
+
+    if (!cstr_is_empty(err))
+    {
+      for (isize_t j = 0; j < vec_expr_size(&results); j++) {
+        free_all(*vec_expr_at_mut(&results, j));
+      }
+      vec_expr_drop(&results);
+      vec_expr_drop(&param_list);
+      free_all(procedure);
+      free_all(list_val);
+      return NULL;
+    }
+
+    vec_expr_push_back(&results, res_val);
+  }
+
+  Expr* current_cdr = new_nil();
+  for (isize_t i = vec_expr_size(&results); i > 0; i--)
+  {
+    Expr* res_elem = *vec_expr_at(&results, i - 1);
+    current_cdr = new_cons(expr_clone(res_elem), current_cdr);
+
+    free_all(res_elem);
+  }
+
+  vec_expr_drop(&results);
+  vec_expr_drop(&param_list);
+  free_all(procedure);
+  free_all(list_val);
+
+  return current_cdr;
+}
+
+
 Expr* add_proc(vec_expr *args, Env* env, cstr* err)
 {
   // (+) -> 0
@@ -484,6 +623,27 @@ Expr* div_proc(vec_expr *args, Env* env, cstr* err)
   }
 }
 
+Expr* list_proc(vec_expr *args, Env* env, cstr* err)
+{
+  // (list 1 2 3) -> (1, 2, 3)
+
+  (void) env;
+  (void) err;
+
+  Expr* head = new_nil();
+
+	// In the case of [1, 5, 4]
+	// 1st iteration: Cons(4, Nil)
+	// 2nd iteration: Cons(5, Cons(4, Nil))
+	// 3rd iteration: Cons(1, Cons(5, Cons(4, Nil)))
+  for (isize_t i = vec_expr_size(args); i > 0; i--)
+  {
+    head = new_cons(expr_clone(*vec_expr_at(args, i - 1)), head);
+  }
+
+  return head;
+}
+
 Env* find_env(Env* env, const cstr* name)
 {
   Env* current = env;
@@ -525,11 +685,15 @@ Env* standard_env(void)
   REGISTER_PROC(b, "quote", quote_proc, true);
   REGISTER_PROC(b, "setf", setf_proc, true);
   REGISTER_PROC(b, "lambda", lambda_proc, true);
+  REGISTER_PROC(b, "apply", apply_proc, true);
+  REGISTER_PROC(b, "map", map_proc, true);
 
   REGISTER_PROC(b, "+", add_proc, false);
   REGISTER_PROC(b, "-", sub_proc, false);
   REGISTER_PROC(b, "*", mul_proc, false);
   REGISTER_PROC(b, "/", div_proc, false);
+
+  REGISTER_PROC(b, "list", list_proc, false);
 
   return env;
 }
