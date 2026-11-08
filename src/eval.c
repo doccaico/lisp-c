@@ -13,12 +13,7 @@ Expr* eval(Expr* expr, Env* env, cstr* err)
       }
       else
       {
-        // cstr expr_str = to_string(expr);
-        // cstr msg = cstr_from_fmt("undefined symbol: %s", cstr_str(&expr_str));
-        // cstr_assign(err, cstr_str(&msg));
-        // cstr_drop(&msg);
-        // cstr_drop(&expr_str);
-        cstr s = to_string(expr);
+        const cstr s = to_string(expr);
         assign_err(err, "undefined symbol: %s", cstr_str(&s));
         cstr_drop(&s);
         return NULL;
@@ -38,11 +33,6 @@ Expr* eval(Expr* expr, Env* env, cstr* err)
         return NULL;
       }
 
-      // Expr* pro = eval(first, env, err);
-      // if (!cstr_is_empty(err))
-      // {
-      //   return NULL;
-      // }
       Expr* pro = first;
 
       bool list_ok;
@@ -64,7 +54,7 @@ Expr* eval(Expr* expr, Env* env, cstr* err)
         for (isize_t i = 0; i < vec_expr_size(&list); i++)
         {
           Expr** elem = vec_expr_at_mut(&list, i);
-          vec_expr_push_back(&args, *elem);
+          vec_expr_push_back(&args, expr_clone(*elem));
         }
       }
       else
@@ -92,17 +82,19 @@ Expr* eval(Expr* expr, Env* env, cstr* err)
 
       Expr* final_result = invoke(pro, &args, env, err);
 
+      for (isize_t i = 0; i < vec_expr_size(&args); i++)
+      {
+        free_all(*vec_expr_at_mut(&args, i));
+      }
+
       free_all(pro);
       vec_expr_drop(&list);
-      // invoke 内部で args の中身を流用していないことが前提です。
-      // もし invoke が args を破壊的に吸い取るなら、中身の要素の free_all 扱いに注意してください。
-      // 通常、ベクトルの器の drop は必須です。
       vec_expr_drop(&args);
 
       return final_result;
   }
 
-  return NULL;
+  unreachable("eval: unreachable");
 }
 
 
@@ -111,15 +103,7 @@ Expr* invoke(Expr* procedure, vec_expr* args, Env* env, cstr* err)
   switch (procedure->type)
   {
     case TYPE_PROC:
-      Expr* res = procedure->data.proc.pro(args, env, err);
-      if (!cstr_is_empty(err))
-      {
-        return NULL;
-      }
-      else
-      {
-        return res;
-      }
+      return procedure->data.proc.pro(args, env, err);
     case TYPE_LAMBDA:
       if (vec_expr_size(args) != vec_cstr_size(&procedure->data.lambda.params))
       {
@@ -127,32 +111,41 @@ Expr* invoke(Expr* procedure, vec_expr* args, Env* env, cstr* err)
             "wrong number of arguments: expected %d, got %d",
             vec_cstr_size(&procedure->data.lambda.params),
             vec_expr_size(args));
-        // cstr_assign(err, cstr_str(&msg));
         assign_err(err, "not a procedure or lambda: %s", cstr_str(&s));
         cstr_drop(&s);
         return NULL;
       }
-      Env* new_env = malloc(sizeof(Env));
+
+      Env* new_env = xmalloc(sizeof(Env));
       new_env->outer = procedure->data.lambda.closure;
       new_env->bindings = hmap_proc_init();
+
       for (isize_t i = 0; i < vec_cstr_size(&procedure->data.lambda.params); i++)
       {
         const cstr* param_name_ptr = vec_cstr_at(&procedure->data.lambda.params, i);
         cstr key_clone = cstr_clone(*param_name_ptr);
-        Expr* value_expr = *vec_expr_at(args, i);
+        Expr* value_expr = expr_clone(*vec_expr_at(args, i));
         hmap_proc_value pair = {
           .first = key_clone,
           .second = value_expr,
         };
         hmap_proc_push(&new_env->bindings, pair);
       }
-      return eval(procedure->data.lambda.body, new_env, err);
+
+      Expr* result = eval(procedure->data.lambda.body, new_env, err);
+
+      for (c_each(n, hmap_proc, new_env->bindings))
+      {
+        hmap_proc_value* pair = n.ref;
+        cstr_drop(&pair->first);
+        free_all(pair->second);
+      }
+      hmap_proc_drop(&new_env->bindings);
+      free(new_env);
+
+      return result;
     default:
-      cstr s = to_string(procedure);
-      // cstr msg = cstr_from_fmt("not a procedure or lambda: %s", cstr_str(&s));
-      // cstr_assign(err, cstr_str(&msg));
-      // cstr_drop(&msg);
-      // cstr_drop(&s);
+      const cstr s = to_string(procedure);
       assign_err(err, "not a procedure or lambda: %s", cstr_str(&s));
       cstr_drop(&s);
       return NULL;

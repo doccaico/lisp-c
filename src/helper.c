@@ -1,7 +1,31 @@
+void* xmalloc(size_t size)
+{
+    void* ptr = malloc(size);
+    if (ptr == NULL)
+    {
+        fprintf(stderr, "Fatal: Out of memory (allocating %zu bytes)\n", size);
+        exit(EXIT_FAILURE);
+    }
+    return ptr;
+}
+
+#ifdef NDEBUG
+    // Release build
+    #if defined(__GNUC__)
+        #define unreachable(msg) __builtin_unreachable()
+    #elif defined(_MSC_VER)
+        #define unreachable(msg) __assume(0)
+    #else
+        #define unreachable(msg) do { for(;;); } while(0)
+    #endif
+#else
+    // Debug Build
+    #define unreachable(msg) assert(false && msg)
+#endif
 
 Expr* new_symbol(cstr sym)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_SYMBOL;
   e->data.sym = sym;
   return e;
@@ -9,7 +33,7 @@ Expr* new_symbol(cstr sym)
 
 Expr* new_int(i64 num)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_NUMBER;
   e->data.num = num;
   return e;
@@ -17,7 +41,7 @@ Expr* new_int(i64 num)
 
 Expr* new_float(f64 flo)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_FLOAT;
   e->data.flo = flo;
   return e;
@@ -25,7 +49,7 @@ Expr* new_float(f64 flo)
 
 Expr* new_str(cstr str)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_STRING;
   e->data.str = str;
   return e;
@@ -33,7 +57,7 @@ Expr* new_str(cstr str)
 
 Expr* new_cons(Expr* car, Expr* cdr)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_CONS;
   e->data.cons.car = car;
   e->data.cons.cdr = cdr;
@@ -42,7 +66,7 @@ Expr* new_cons(Expr* car, Expr* cdr)
 
 Expr* new_proc(LispProc proc, bool is_special)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_PROC;
   e->data.proc.pro = proc;
   e->data.proc.is_special = is_special;
@@ -51,7 +75,7 @@ Expr* new_proc(LispProc proc, bool is_special)
 
 Expr* new_lambda(vec_cstr params, Expr* body, Env* closure)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_LAMBDA;
   e->data.lambda.params = params;
   e->data.lambda.body = body;
@@ -61,7 +85,7 @@ Expr* new_lambda(vec_cstr params, Expr* body, Env* closure)
 
 Expr* new_nil(void)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_NIL;
   e->data.nil_val = 0; // dummy value
   return e;
@@ -69,7 +93,7 @@ Expr* new_nil(void)
 
 Expr* new_true(void)
 {
-  Expr* e = malloc(sizeof(Expr));
+  Expr* e = xmalloc(sizeof(Expr));
   e->type = TYPE_TRUE;
   e->data.tru_val = 0; // dummy value
   return e;
@@ -163,7 +187,7 @@ cstr to_string(Expr* expr)
 
 Expr* expr_clone(Expr* expr)
 {
-  Expr* new_expr = malloc(sizeof(Expr));
+  Expr* new_expr = xmalloc(sizeof(Expr));
 
   *new_expr = *expr;
 
@@ -210,6 +234,18 @@ void free_all(Expr* expr)
     case TYPE_CONS:
       free_all(expr->data.cons.car);
       free_all(expr->data.cons.cdr);
+      break;
+    case TYPE_LAMBDA:
+      // 引数名ベクトル (vec_cstr) の中身の文字列をすべて drop
+      for (isize_t i = 0; i < vec_cstr_size(&expr->data.lambda.params); i++)
+      {
+        cstr_drop(vec_cstr_at_mut(&expr->data.lambda.params, i));
+      }
+      // ベクトルの器自体を drop (これが 96 bytes のリークを消します)
+      vec_cstr_drop(&expr->data.lambda.params);
+
+      // ラムダのボディ (AST) を再帰的に解放 (これが大量の 48 bytes リークを消します)
+      free_all(expr->data.lambda.body);
       break;
   }
 

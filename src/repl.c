@@ -16,11 +16,8 @@ int repl(const char* prompt, Env* global_env)
       break;
     }
 
-
-    // 3. 抽象構文木 (AST) の構築 (Read)
     Reader r = init_reader(input_buf);
 
-    // 1行の中に含まれる式を、末尾に到達するまで読み尽くす
     for (;;)
     {
       skip_whitespace(&r);
@@ -38,29 +35,26 @@ int repl(const char* prompt, Env* global_env)
         puts(cstr_str(&err_msg));
         free_all(ast);
         cstr_drop(&err_msg);
-        break; // エラーが起きたらその行の残りの処理は中断
+        break;
       }
 
-      // 式の評価 (Eval)
       Expr* result = eval(ast, global_env, &err_msg);
 
-      // 評価エラーのチェック
       if (!cstr_is_empty(&err_msg)) {
         printf("Eval Error: %s\n", cstr_str(&err_msg));
         free_all(ast);
         free_all(result);
         cstr_drop(&err_msg);
-        break; // エラーが起きたらその行の残りの処理は中断
+        break;
       }
 
-      // 3. 結果の表示 (Print)
       if (result != NULL) {
         cstr out_str = to_string(result);
         printf("%s\n", cstr_str(&out_str));
         cstr_drop(&out_str);
       }
 
-      // 4. この式のメモリを解放して次の式へ
+      // この式のメモリを解放して次の式へ
       free_all(ast);
       free_all(result);
       cstr_drop(&err_msg);
